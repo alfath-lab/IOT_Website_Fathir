@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Micro:bit IoT Dashboard & AI Control</title>
+  
+  <!-- CDN Chart.js & TensorFlow.js / Teachable Machine -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --border: #334155;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #22c55e;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .status-badge {
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      margin-right: 10px;
+    }
+    .status-badge.disconnected { background: #451a1a; color: #fca5a5; }
+    .status-badge.connected { background: #14532d; color: #86efac; }
+    .status-badge.connecting { background: #422006; color: #fdba74; }
+
+    .btn {
+      background: var(--primary);
+      color: #0f172a;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: var(--primary-hover); color: white; }
+    .btn:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+    .btn.danger { background: var(--danger); color: white; }
+    .btn.danger:hover { background: #b91c1c; }
+
+    .grid-layout {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--primary);
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Sensor Grid */
+    .sensor-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+    }
+    .sensor-card {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .sensor-label { font-size: 0.85rem; color: var(--text-muted); text-transform: capitalize; }
+    .sensor-value { font-size: 1.6rem; font-weight: bold; margin-top: 6px; color: var(--text); }
+
+    /* Output Controls */
+    .control-item {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Switch Component */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 26px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider-toggle {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #475569; transition: .3s; border-radius: 34px;
+    }
+    .slider-toggle:before {
+      position: absolute; content: ""; height: 18px; width: 18px; left: 4px; bottom: 4px;
+      background-color: white; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .slider-toggle { background-color: var(--success); }
+    input:checked + .slider-toggle:before { transform: translateX(24px); }
+    input:disabled + .slider-toggle { opacity: 0.5; cursor: not-allowed; }
+
+    /* Range Slider */
+    .range-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 60%;
+    }
+    .range-group input[type="range"] {
+      width: 100%;
+      accent-color: var(--primary);
+    }
+
+    /* D-Pad Control */
+    .dpad-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 0;
+    }
+    .dpad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 64px);
+      grid-template-rows: repeat(3, 64px);
+      gap: 6px;
+    }
+    .dpad-btn {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+      touch-action: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .dpad-btn:hover { background: #1e293b; }
+    .dpad-btn:active, .dpad-btn.active-press {
+      background: var(--primary);
+      color: #0f172a;
+      transform: scale(0.94);
+    }
+    .dpad-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      background: #0f172a;
+      transform: none;
+    }
+    .dpad-up    { grid-column: 2; grid-row: 1; }
+    .dpad-left  { grid-column: 1; grid-row: 2; }
+    .dpad-stop  { grid-column: 2; grid-row: 2; background: #3f0f13; border-color: #7f1d1d; }
+    .dpad-stop:hover { background: #7f1d1d; }
+    .dpad-right { grid-column: 3; grid-row: 2; }
+    .dpad-down  { grid-column: 2; grid-row: 3; }
+
+    .dpad-status {
+      font-family: monospace;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      min-height: 20px;
+    }
+
+    .speed-control { width: 100%; max-width: 260px; }
+    .speed-control label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    /* Gamepad UI */
+    .gamepad-box {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-top: 4px;
+    }
+    .gamepad-status {
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .gamepad-status.connected { color: var(--success); }
+    .gamepad-hint { font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+
+    /* Teachable Machine / Camera Section */
+    .ai-input-group {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .ai-input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+    .ai-input:focus { outline: 1px solid var(--primary); }
+    
+    .camera-display {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    #webcam-container {
+      width: 200px;
+      height: 200px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--border);
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #webcam-container canvas {
+      border-radius: 10px;
+    }
+    #label-container {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .prediction-bar {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+    .prediction-progress {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      background: rgba(56, 189, 248, 0.2);
+      z-index: 0;
+      transition: width 0.2s;
+    }
+    .prediction-text { z-index: 1; position: relative; }
+
+    /* Terminal & Chart */
+    #log {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      height: 120px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #38bdf8;
+    }
+    .chart-container {
+      position: relative;
+      height: 250px;
+      width: 100%;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div>
+      <h2>Micro:bit IoT & AI Dashboard</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Bluetooth Controller, Telemetry & Vision AI</p>
+    </div>
+    <div>
+      <span id="statusBadge" class="status-badge disconnected">Terputus</span>
+      <button id="connectBtn" class="btn" onclick="toggleConnect()">Hubungkan Micro:bit</button>
+    </div>
+  </header>
+
+  <div class="grid-layout">
+    <!-- Panel Sensor -->
+    <div class="card">
+      <div class="card-title">
+        <span>Telemetri Sensor</span>
+        <span style="font-size: 0.8rem; color: var(--text-muted);">(Real-Time)</span>
+      </div>
+      <div class="sensor-grid" id="sensorContainer">
+        <div class="sensor-card" id="sensorPlaceholder">
+          <div class="sensor-label">Menunggu Data...</div>
+          <div class="sensor-value">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel Kontrol Output -->
+    <div class="card">
+      <div class="card-title">
+        <span>Kontrol Perangkat Output</span>
+      </div>
+      <div class="control-item">
+        <div>
+          <div style="font-weight: 600;">Lampu</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">Kontrol Switch (ON/OFF)</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="switchLampu" onchange="sendSwitchData('lampu', this)" disabled>
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
+      <div class="control-item">
+        <div>
+          <div style="font-weight: 600;">Mode Sistem</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">0 = Manual, 1 = Auto</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="switchMode" onchange="sendSwitchData('mode', this)" disabled>
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
+      <div class="control-item">
+        <div>
+          <div style="font-weight: 600;">Kecepatan Kipas</div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);">Nilai: <span id="valKipas">0</span></div>
+        </div>
+        <div class="range-group">
+          <input type="range" id="sliderKipas" min="0" max="1023" value="0" oninput="updateSliderLabel('valKipas', this.value)" onchange="sendSliderData('kipas', this.value)" disabled>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel D-Pad TinyBit -->
+    <div class="card">
+      <div class="card-title">
+        <span>Kontrol Gerak TinyBit (D-Pad)</span>
+      </div>
+      <div class="dpad-wrapper">
+        <div class="dpad-grid">
+          <button class="dpad-btn dpad-up" id="dpadUp" disabled aria-label="Maju">&#9650;</button>
+          <button class="dpad-btn dpad-left" id="dpadLeft" disabled aria-label="Kiri">&#9664;</button>
+          <button class="dpad-btn dpad-stop" id="dpadStop" disabled aria-label="Berhenti">&#9632;</button>
+          <button class="dpad-btn dpad-right" id="dpadRight" disabled aria-label="Kanan">&#9654;</button>
+          <button class="dpad-btn dpad-down" id="dpadDown" disabled aria-label="Mundur">&#9660;</button>
+        </div>
+        <div class="speed-control">
+          <label>Kecepatan Motor <span id="valDpadSpeed">600</span></label>
+          <input type="range" id="sliderDpadSpeed" min="0" max="1023" value="600" style="width:100%; accent-color: var(--primary);" oninput="updateSliderLabel('valDpadSpeed', this.value)">
+        </div>
+        <div class="dpad-status" id="dpadStatus">Perintah terakhir: -</div>
+
+        <div class="gamepad-box" id="gamepadBox">
+          <div class="gamepad-status" id="gamepadStatus">
+            &#127918; Kontroler Bluetooth: Tidak terhubung
+          </div>
+          <div class="gamepad-hint">
+            Pasangkan kontroler Bluetooth lewat OS terlebih dahulu, lalu tekan salah satu tombolnya di sini.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel Teachable Machine / AI Camera -->
+    <div class="card">
+      <div class="card-title">
+        <span>Vision AI (Teachable Machine)</span>
+      </div>
+      <div class="ai-input-group">
+        <input type="text" id="tmUrl" class="ai-input" placeholder="Masukkan URL Teachable Machine..." value="https://teachablemachine.withgoogle.com/models/3WqGwhdwI/">
+        <button id="startAiBtn" class="btn" onclick="initAI()">Mulai</button>
+      </div>
+      <div class="camera-display">
+        <div id="webcam-container">
+          <span style="font-size: 0.8rem; color: var(--text-muted);">Kamera Mati</span>
+        </div>
+        <div id="label-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel Grafik -->
+  <div class="card" style="margin-bottom: 24px;">
+    <div class="card-title">
+      <span>Grafik Sensor Dynamis</span>
+    </div>
+    <div class="chart-container">
+      <canvas id="sensorChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Terminal Log -->
+  <div class="card">
+    <div class="card-title">
+      <span>Log Komunikasi Serial BLE</span>
+    </div>
+    <div id="log">Siap mendengarkan koneksi Bluetooth...<br></div>
+  </div>
+</div>
+
+<script>
+  // UUID Konfigurasi Bluetooth BLE
+  const SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const TX_CHARACTERISTIC_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+  const RX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+  let bleDevice = null;
+  let rxCharacteristic = null;
+  let txCharacteristic = null;
+  let rxBuffer = '';
+  let isDisconnecting = false;
+
+  // Chart Instance
+  let sensorChart = null;
+  const maxChartDataPoints = 20;
+
+  // Variabel Teachable Machine
+  let model, webcam, labelContainer, maxPredictions;
+  let isAiRunning = false;
+  let lastPredictedClass = "";
+
+  function getControlElements() {
+    return [
+      document.getElementById('switchLampu'),
+      document.getElementById('switchMode'),
+      document.getElementById('sliderKipas'),
+      document.getElementById('dpadUp'),
+      document.getElementById('dpadDown'),
+      document.getElementById('dpadLeft'),
+      document.getElementById('dpadRight'),
+      document.getElementById('dpadStop')
+    ];
+  }
+
+  function initChart() {
+    const ctx = document.getElementById('sensorChart').getContext('2d');
+    sensorChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
+        },
+        plugins: { legend: { labels: { color: '#f8fafc' } } }
+      }
+    });
+  }
+
+  window.onload = () => {
+    initChart();
+    setupDpadListeners();
+    setupGamepadListeners();
+
+    if (!navigator.bluetooth) {
+      log('Peringatan: Browser ini tidak mendukung Web Bluetooth API.');
+      document.getElementById('connectBtn').disabled = true;
+    }
+  };
+
+  function log(msg) {
+    const logDiv = document.getElementById('log');
+    const time = new Date().toLocaleTimeString();
+    logDiv.innerHTML += `[${time}] ${msg}<br>`;
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }
+
+  async function toggleConnect() {
+    try {
+      if (bleDevice && bleDevice.gatt && bleDevice.gatt.connected) {
+        await disconnectBLE();
+      } else {
+        await connectBLE();
+      }
+    } catch (error) {
+      log('Terjadi kesalahan: ' + (error?.message || error));
+      updateUIConnected(false);
+    }
+  }
+
+  async function connectBLE() {
+    try {
+      isDisconnecting = false;
+      updateUIConnecting();
+      log('Mencari perangkat Micro:bit...');
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'BBC micro:bit' }],
+        optionalServices: [SERVICE_UUID]
+      });
+
+      bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+      log('Menghubungkan ke GATT Server...');
+      const server = await bleDevice.gatt.connect();
+
+      log('Mengambil Service...');
+      const service = await server.getPrimaryService(SERVICE_UUID);
+
+      txCharacteristic = await service.getCharacteristic(TX_CHARACTERISTIC_UUID);
+      rxCharacteristic = await service.getCharacteristic(RX_CHARACTERISTIC_UUID);
+
+      await txCharacteristic.startNotifications();
+      txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+
+      updateUIConnected(true);
+      log('Berhasil Terhubung ke Micro:bit!');
+    } catch (error) {
+      log('Gagal Terhubung: ' + (error?.message || error));
+      updateUIConnected(false);
+    }
+  }
+
+  async function disconnectBLE() {
+    if (!bleDevice) {
+      updateUIConnected(false);
+      return;
+    }
+    isDisconnecting = true;
+    log('Memutuskan koneksi...');
+    try {
+      if (txCharacteristic) {
+        try { await txCharacteristic.stopNotifications(); } catch (e) {}
+        txCharacteristic.removeEventListener('characteristicvaluechanged', handleNotifications);
+      }
+      if (bleDevice.gatt && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+      }
+      log('Berhasil diputuskan dari Micro:bit.');
+    } catch (error) {
+      log('Kendala saat putus koneksi: ' + (error?.message || error));
+    } finally {
+      rxCharacteristic = null;
+      txCharacteristic = null;
+      rxBuffer = '';
+      isDisconnecting = false;
+      updateUIConnected(false);
+    }
+  }
+
+  function onDisconnected() {
+    if (isDisconnecting) return;
+    log('Koneksi Bluetooth terputus.');
+    rxCharacteristic = null;
+    txCharacteristic = null;
+    updateUIConnected(false);
+  }
+
+  function updateUIConnecting() {
+    const statusBadge = document.getElementById('statusBadge');
+    statusBadge.textContent = 'Menghubungkan...';
+    statusBadge.className = 'status-badge connecting';
+    document.getElementById('connectBtn').disabled = true;
+  }
+
+  function updateUIConnected(isConnected) {
+    const statusBadge = document.getElementById('statusBadge');
+    const connectBtn = document.getElementById('connectBtn');
+    connectBtn.disabled = false;
+
+    if (isConnected) {
+      statusBadge.textContent = 'Terhubung';
+      statusBadge.className = 'status-badge connected';
+      connectBtn.textContent = 'Putuskan Koneksi';
+      connectBtn.classList.add('danger');
+    } else {
+      statusBadge.textContent = 'Terputus';
+      statusBadge.className = 'status-badge disconnected';
+      connectBtn.textContent = 'Hubungkan Micro:bit';
+      connectBtn.classList.remove('danger');
+    }
+
+    getControlElements().forEach(el => {
+      if (el) el.disabled = !isConnected;
+    });
+  }
+
+  function handleNotifications(event) {
+    const value = event.target.value;
+    const decoder = new TextDecoder('utf-8');
+    rxBuffer += decoder.decode(value);
+
+    let lines = rxBuffer.split(/\r?\n/);
+    rxBuffer = lines.pop();
+
+    for (let line of lines) {
+      line = line.trim();
+      if (line.length > 0) {
+        log('Masuk: ' + line);
+        parseDataLine(line);
+      }
+    }
+  }
+
+  function parseDataLine(dataString) {
+    const parts = dataString.split(':');
+    if (parts.length < 2) return;
+
+    const key = parts[0].trim().toLowerCase();
+    const value = parseFloat(parts[1].trim());
+
+    if (isNaN(value)) return;
+
+    updateSensorUI(key, value);
+
+    if (key === 'lampu') document.getElementById('switchLampu').checked = (value === 1);
+    if (key === 'mode') document.getElementById('switchMode').checked = (value === 1);
+    if (key === 'kipas') {
+      document.getElementById('sliderKipas').value = value;
+      document.getElementById('valKipas').textContent = value;
+    }
+
+    updateChart(key, value);
+  }
+
+  function updateSensorUI(key, value) {
+    let sensorEl = document.getElementById(`sensor-val-${key}`);
+    const container = document.getElementById('sensorContainer');
+    const placeholder = document.getElementById('sensorPlaceholder');
+
+    if (placeholder) placeholder.remove();
+
+    if (!sensorEl) {
+      const card = document.createElement('div');
+      card.className = 'sensor-card';
+      card.innerHTML = `
+        <div class="sensor-label">${key}</div>
+        <div class="sensor-value" id="sensor-val-${key}">${value}</div>
+      `;
+      container.appendChild(card);
+    } else {
+      sensorEl.textContent = value;
+    }
+  }
+
+  function updateChart(key, value) {
+    const timeLabel = new Date().toLocaleTimeString();
+    let dataset = sensorChart.data.datasets.find(ds => ds.label === key);
+
+    if (!dataset) {
+      const randomColor = `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`;
+      dataset = {
+        label: key,
+        data: [],
+        borderColor: randomColor,
+        backgroundColor: randomColor,
+        tension: 0.3,
+        fill: false
+      };
+      sensorChart.data.datasets.push(dataset);
+    }
+
+    if (sensorChart.data.labels.length === 0 || sensorChart.data.labels[sensorChart.data.labels.length - 1] !== timeLabel) {
+      sensorChart.data.labels.push(timeLabel);
+    }
+
+    dataset.data.push(value);
+
+    if (sensorChart.data.labels.length > maxChartDataPoints) {
+      sensorChart.data.labels.shift();
+      sensorChart.data.datasets.forEach(ds => ds.data.shift());
+    }
+
+    sensorChart.update();
+  }
+
+  async function sendBLEData(command) {
+    if (!rxCharacteristic) {
+      log('Tidak terkirim (' + command + '): belum terhubung.');
+      return;
+    }
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(command + '\n');
+      await rxCharacteristic.writeValue(data);
+      log('Terkirim: ' + command);
+    } catch (err) {
+      log('Gagal Kirim Data: ' + (err?.message || err));
+    }
+  }
+
+  function sendSwitchData(key, element) {
+    sendBLEData(`${key}:${element.checked ? 1 : 0}`);
+  }
+
+  function updateSliderLabel(labelId, val) {
+    document.getElementById(labelId).textContent = val;
+  }
+
+  function sendSliderData(key, value) {
+    sendBLEData(`${key}:${value}`);
+  }
+
+  /* D-PAD CONTROLLER */
+  function setupDpadListeners() {
+    const dpadMap = { dpadUp: 'maju', dpadDown: 'mundur', dpadLeft: 'kiri', dpadRight: 'kanan' };
+
+    Object.keys(dpadMap).forEach(btnId => {
+      const btn = document.getElementById(btnId);
+      const direction = dpadMap[btnId];
+
+      const startPress = (ev) => {
+        ev.preventDefault();
+        if (btn.disabled) return;
+        btn.classList.add('active-press');
+        sendDpadCommand(direction);
+      };
+      const endPress = (ev) => {
+        ev.preventDefault();
+        if (btn.disabled) return;
+        btn.classList.remove('active-press');
+        sendDpadCommand('stop');
+      };
+
+      btn.addEventListener('mousedown', startPress);
+      btn.addEventListener('mouseup', endPress);
+      btn.addEventListener('mouseleave', endPress);
+      btn.addEventListener('touchstart', startPress, { passive: false });
+      btn.addEventListener('touchend', endPress, { passive: false });
+    });
+
+    document.getElementById('dpadStop').addEventListener('click', () => {
+      sendDpadCommand('stop');
+    });
+  }
+
+  function sendDpadCommand(direction, source) {
+    const statusEl = document.getElementById('dpadStatus');
+    const tag = source ? ` [${source}]` : '';
+    if (direction === 'stop') {
+      sendBLEData('dpad:stop');
+      statusEl.textContent = `Perintah terakhir: STOP${tag}`;
+      return;
+    }
+    const speed = document.getElementById('sliderDpadSpeed').value;
+    sendBLEData(`dpad:${direction}:${speed}`);
+    statusEl.textContent = `Perintah terakhir: ${direction.toUpperCase()} (${speed})${tag}`;
+  }
+
+  /* GAMEPAD CONTROLLER */
+  let activeGamepadIndex = null;
+  let gamepadPollHandle = null;
+  let lastGamepadDirection = null;
+  const DPAD_BUTTON_ID_MAP = { maju: 'dpadUp', mundur: 'dpadDown', kiri: 'dpadLeft', kanan: 'dpadRight' };
+
+  function setupGamepadListeners() {
+    if (!navigator.getGamepads) return;
+    window.addEventListener('gamepadconnected', (e) => {
+      activeGamepadIndex = e.gamepad.index;
+      log('Kontroler terdeteksi: ' + e.gamepad.id);
+      updateGamepadStatus(true, e.gamepad.id);
+      startGamepadPolling();
+    });
+
+    window.addEventListener('gamepaddisconnected', (e) => {
+      if (e.gamepad.index === activeGamepadIndex) {
+        log('Kontroler terputus.');
+        activeGamepadIndex = null;
+        lastGamepadDirection = null;
+        updateGamepadStatus(false);
+        stopGamepadPolling();
+      }
+    });
+  }
+
+  function startGamepadPolling() {
+    if (gamepadPollHandle) return;
+    const loop = () => {
+      pollGamepad();
+      gamepadPollHandle = requestAnimationFrame(loop);
+    };
+    gamepadPollHandle = requestAnimationFrame(loop);
+  }
+
+  function stopGamepadPolling() {
+    if (gamepadPollHandle) cancelAnimationFrame(gamepadPollHandle);
+    gamepadPollHandle = null;
+  }
+
+  function pollGamepad() {
+    if (activeGamepadIndex === null) return;
+    const gp = navigator.getGamepads()[activeGamepadIndex];
+    if (!gp || !rxCharacteristic) return;
+
+    let direction = null;
+    if (gp.buttons[12]?.pressed) direction = 'maju';
+    else if (gp.buttons[13]?.pressed) direction = 'mundur';
+    else if (gp.buttons[14]?.pressed) direction = 'kiri';
+    else if (gp.buttons[15]?.pressed) direction = 'kanan';
+    else {
+      const x = gp.axes[0] || 0, y = gp.axes[1] || 0;
+      if (y < -0.5) direction = 'maju';
+      else if (y > 0.5) direction = 'mundur';
+      else if (x < -0.5) direction = 'kiri';
+      else if (x > 0.5) direction = 'kanan';
+    }
+
+    if (direction !== lastGamepadDirection) {
+      if (direction) sendDpadCommand(direction, 'kontroler');
+      else sendDpadCommand('stop', 'kontroler');
+      lastGamepadDirection = direction;
+    }
+  }
+
+  function updateGamepadStatus(connected, name) {
+    const el = document.getElementById('gamepadStatus');
+    el.textContent = connected ? `🎮 Kontroler: Terhubung (${name})` : '🎮 Kontroler: Tidak terhubung';
+    el.classList.toggle('connected', connected);
+  }
+
+  /* ================= INTEGRASI TEACHABLE MACHINE ================= */
+  async function initAI() {
+    let baseURL = document.getElementById('tmUrl').value.trim();
+    if (!baseURL) {
+      alert('Silakan masukkan URL model Teachable Machine terlebih dahulu!');
+      return;
+    }
+    if (!baseURL.endsWith('/')) baseURL += '/';
+
+    const startBtn = document.getElementById('startAiBtn');
+    startBtn.disabled = true;
+    startBtn.textContent = 'Memuat...';
+
+    const modelURL = baseURL + "model.json";
+    const metadataURL = baseURL + "metadata.json";
+
+    try {
+      log('Memuat Model AI dari Teachable Machine...');
+      model = await tmImage.load(modelURL, metadataURL);
+      maxPredictions = model.getTotalClasses();
+
+      log('Membuka Webcam...');
+      const flip = true;
+      webcam = new tmImage.Webcam(200, 200, flip);
+      await webcam.setup();
+      await webcam.play();
+
+      const container = document.getElementById("webcam-container");
+      container.innerHTML = '';
+      container.appendChild(webcam.canvas);
+
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = '';
+
+      for (let i = 0; i < maxPredictions; i++) {
+        const bar = document.createElement("div");
+        bar.className = "prediction-bar";
+        bar.innerHTML = `
+          <div class="prediction-progress" id="progress-${i}"></div>
+          <span class="prediction-text" id="text-${i}">Memuat...</span>
+        `;
+        labelContainer.appendChild(bar);
+      }
+
+      isAiRunning = true;
+      startBtn.textContent = 'AI Aktif';
+      log('Model AI Berhasil Dijalankan!');
+      window.requestAnimationFrame(aiLoop);
+
+    } catch (err) {
+      log('Gagal Memuat AI: ' + (err?.message || err));
+      alert('Gagal memuat model. Pastikan URL benar dan akses kamera diizinkan.');
+      startBtn.disabled = false;
+      startBtn.textContent = 'Mulai';
+    }
+  }
+
+  async function aiLoop() {
+    if (!isAiRunning) return;
+    webcam.update();
+    await predictAI();
+    window.requestAnimationFrame(aiLoop);
+  }
+
+  async function predictAI() {
+    const prediction = await model.predict(webcam.canvas);
+    let highestProb = 0;
+    let topClass = "";
+
+    for (let i = 0; i < maxPredictions; i++) {
+      const className = prediction[i].className;
+      const probability = prediction[i].probability;
+      const percent = (probability * 100).toFixed(1);
+
+      document.getElementById(`text-${i}`).textContent = `${className}: ${percent}%`;
+      document.getElementById(`progress-${i}`).style.width = `${percent}%`;
+
+      if (probability > highestProb) {
+        highestProb = probability;
+        topClass = className;
+      }
+    }
+
+    // Jika objek terdeteksi dengan keyakinan > 75% dan berbeda dari objek sebelumnya, kirim ke micro:bit
+    if (highestProb > 0.75 && topClass !== lastPredictedClass) {
+      lastPredictedClass = topClass;
+      sendBLEData(`vision:${topClass.toLowerCase()}`);
+    }
+  }
+</script>
+</body>
+</html>
